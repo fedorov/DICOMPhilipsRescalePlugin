@@ -66,28 +66,25 @@ class DICOMPhilipsRescalePluginClass(DICOMPlugin):
 
     if vNode:
       # convert to float pixel type
-      caster = vtk.vtkImageCast()
-      caster.SetOutputScalarTypeToFloat()
-      caster.SetInput(vNode.GetImageData())
-      caster.Update()
-
-      imageData = vtk.vtkImageData()
-      imageData.DeepCopy(caster.GetOutput())
-      shape = list(imageData.GetDimensions())
-      shape.reverse()
-      a = vtk.util.numpy_support.vtk_to_numpy(imageData.GetPointData().GetScalars()).reshape(shape)
-      print ('Data assigned')
-
       intercept = slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['ScaleIntercept'])
       slope = slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['ScaleSlope'])
-      a[:] = (a - float(intercept))/float(slope)
+
+      rescale = vtk.vtkImageShiftScale()
+      rescale.SetShift(-1.*float(intercept))
+      rescale.SetScale(1./float(slope))
+      rescale.SetOutputScalarTypeToFloat()
+      rescale.SetInput(vNode.GetImageData())
+      rescale.Update()
+
+      imageData = vtk.vtkImageData()
+      imageData.DeepCopy(rescale.GetOutput())
+
       # Note: the assumption here is that intercept/slope are identical for all
       # slices in the series. According to Tom Chenevert, this is typically the
       # case: "The exception is when there are multiple image types in a series,
       # such as real, imaginary, magnitude and phase images all stored in the
       # series.  But this is not common."
       vNode.SetAndObserveImageData(imageData)
-      print('Philips done')
 
     return vNode
 
