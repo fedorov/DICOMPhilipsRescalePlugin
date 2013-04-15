@@ -26,8 +26,10 @@ class DICOMPhilipsRescalePluginClass(DICOMPlugin):
 
     # tags used to rescale the values
     self.philipsVolumeTags = {}
-    self.philipsVolumeTags['ScaleIntercept'] = "2005,100d"
-    self.philipsVolumeTags['ScaleSlope'] = "2005,100e"
+    self.philipsVolumeTags['PrivateScaleIntercept'] = "2005,100d"
+    self.philipsVolumeTags['PrivateScaleSlope'] = "2005,100e"
+    self.philipsVolumeTags['ScaleIntercept'] = "0028,1052"
+    self.philipsVolumeTags['ScaleSlope'] = "0028,1053"
     self.philipsVolumeTags['Manufacturer'] = "0008,0070"
 
     for tagName,tagVal in self.philipsVolumeTags.iteritems():
@@ -53,7 +55,9 @@ class DICOMPhilipsRescalePluginClass(DICOMPlugin):
       if not isPhilips:
         continue
       loadables += scalarVolumePlugin.examine([files])
-      loadables[-1].name = loadables[-1].name+' with Philips rescaling applied'
+      loadables[-1].name = loadables[-1].name+' - rescaled based on Philips private tags'
+      loadables[-1].warning = 'Warning: Do not use for reading derived maps such as ADC, FA etc.'
+      loadables[-1].confidence = 0.15 # make sure standard scalar volume reader takes preference
 
     return loadables
 
@@ -65,15 +69,35 @@ class DICOMPhilipsRescalePluginClass(DICOMPlugin):
     vNode = scalarVolumePlugin.loadFilesWithArchetype(loadable.files, loadable.name)
 
     if vNode:
-      # convert to float pixel type
-      intercept = slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['ScaleIntercept'])
-      slope = slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['ScaleSlope'])
+      intercept = float(slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['ScaleIntercept']))
+      slope = float(slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['ScaleSlope']))
+      privateIntercept = float(slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['PrivateScaleIntercept']))
+      privateSlope = float(slicer.dicomDatabase.fileValue(loadable.files[0], self.tags['PrivateScaleSlope']))
 
+
+      print('Slope: '+str(slope)+' private: '+str(privateSlope)+' Intercept: '+str(intercept)+' private: '+str(privateIntercept))
+      
+      # vtkImageShiftScale first shifts, then scales
+
+      # First, revert the scaling applied on ITK-level read
+      reverseShift = vtk.vtkImageShiftScale()
+      reverseShift.SetShift(-1.*intercept)
+      reverseShift.SetScale(1)
+      reverseShift.SetInput(vNode.GetImageData())
+      reverseShift.SetOutputScalarTypeToFloat()
+
+      reverseScale = vtk.vtkImageShiftScale()
+      reverseScale.SetShift(0)
+      reverseScale.SetScale(1./slope)
+      reverseScale.SetInput(reverseShift.GetOutput())
+      reverseScale.SetOutputScalarTypeToFloat()
+
+      # Second, apply scaling using the private tags information
       rescale = vtk.vtkImageShiftScale()
-      rescale.SetShift(-1.*float(intercept))
-      rescale.SetScale(1./float(slope))
+      rescale.SetShift(-1.*privateIntercept)
+      rescale.SetScale(1./privateSlope)
       rescale.SetOutputScalarTypeToFloat()
-      rescale.SetInput(vNode.GetImageData())
+      rescale.SetInput(reverseScale.GetOutput())
       rescale.Update()
 
       imageData = vtk.vtkImageData()
@@ -100,7 +124,7 @@ class DICOMPhilipsRescalePlugin:
   def __init__(self, parent):
     parent.title = "DICOM Philips Volume Rescale+Import Plugin"
     parent.categories = ["Developer Tools.DICOM Plugins"]
-    parent.contributors = ["Andrey Fedorov, BWH"]
+    parent.contributors = ["Andrey Fedorov, BWH; Tom Chenevert, Univeristy of Michigan"]
     parent.helpText = """
     This plugin addresses an issue with some images produced by Philips
     scanners, where the values stored in PixelData need to be rescaled using
@@ -108,13 +132,13 @@ class DICOMPhilipsRescalePlugin:
     measuremenes. The rescale formula is the following:
     QuantitativeValue = [SV-ScInt] / ScSlp,
     where SV = stored DICOM pixel value, ScInt = Scale Intercept =
-    (2005,100d), ScSlp = (2005,100e)
+    (2005,100d), ScSlp = Scale Slope = (2005,100e)
     This information was provided by Tom Chenevert, U.Michigan, as part of NCI
     Quantitative Imaging Network Bioinformatics Working Group activities.
     """
     parent.acknowledgementText = """
     This DICOM Plugin was developed by 
-    Andrey Fedorov, BWH.
+    Andrey Fedorov, BWH,
     and was partially funded by NIH grant U01CA151261.
     """
 
