@@ -28,6 +28,7 @@ class DICOMPhilipsRescalePluginClass(DICOMPlugin):
     self.philipsVolumeTags = {}
     self.philipsVolumeTags['PrivateScaleIntercept'] = "2005,100d"
     self.philipsVolumeTags['PrivateScaleSlope'] = "2005,100e"
+    self.philipsVolumeTags['PrivateImageType'] = "2005,1011"
     self.philipsVolumeTags['ScaleIntercept'] = "0028,1052"
     self.philipsVolumeTags['ScaleSlope'] = "0028,1053"
     self.philipsVolumeTags['Manufacturer'] = "0008,0070"
@@ -46,13 +47,14 @@ class DICOMPhilipsRescalePluginClass(DICOMPlugin):
     allfiles = []
     scalarVolumePlugin = slicer.modules.dicomPlugins['DICOMScalarVolumePlugin']()
     for files in fileLists:
-      isPhilips = True
+      fileSuitable = True
       for f in files:
         manufacturer = slicer.dicomDatabase.fileValue(f, self.tags['Manufacturer'])
-        if string.find(manufacturer, 'Philips') == -1:
-          isPhilips = False
+        imageType = slicer.dicomDatabase.fileValue(f,self.tags['PrivateImageType'])
+        if string.find(manufacturer, 'Philips') == -1 or imageType != "M":
+          fileSuitable = False
           break
-      if not isPhilips:
+      if not fileSuitable:
         continue
       loadables += scalarVolumePlugin.examine([files])
       loadables[-1].name = loadables[-1].name+' - rescaled based on Philips private tags'
